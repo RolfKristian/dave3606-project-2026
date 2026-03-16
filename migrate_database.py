@@ -11,6 +11,7 @@ conn = psycopg.connect(
 cur = conn.cursor()
 cur.execute(
     """
+    drop table if exists lego_set;
     create table lego_set(
         id text not null,
         name text not null,
@@ -22,6 +23,7 @@ cur.execute(
 )
 cur.execute(
     """
+    drop table if exists lego_brick;
     create table lego_brick(
         brick_type_id text not null,
         color_id int not null,
@@ -32,6 +34,7 @@ cur.execute(
 )
 cur.execute(
     """
+    drop table if exists lego_inventory;
     create table lego_inventory(
         set_id text not null,
         brick_type_id text not null,
