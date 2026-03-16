@@ -118,3 +118,5 @@ The `Database` class should also have a `close` function that closes the cursor 
 Instead of using `psycopg` directly in the separate endpoint functions, an instance of the `Database` class should be created in the endpoint handler and passed to the function, so that that function only needs to call `execute_and_fetch_all` and `close` on the `Database` instance.
 
 Write a test for each of the separate endpoint functions. In each test, create a mock of the `Database` class, which checks that the SQL query that it is asked to perform is the expected query for that endpoint, and responds with a small number of "SQL rows". Assert that the resulting HTML or JSON from the endpoint is correct given the mocked "query result".
+
+testing
