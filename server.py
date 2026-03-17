@@ -1,7 +1,7 @@
 import json
 import html
 import psycopg
-from flask import Flask, Response, request
+from flask import Flask, Response, request, jsonify
 from time import perf_counter
 
 app = Flask(__name__)
@@ -14,6 +14,8 @@ DB_CONFIG = {
     "password": "bricks",
 }
 
+# Global scope decleration
+conn = psycopg.connect(**DB_CONFIG)
 
 @app.route("/")
 def index():
@@ -27,7 +29,6 @@ def sets():
     rows = ""
 
     start_time = perf_counter()
-    conn = psycopg.connect(**DB_CONFIG)
     try:
         with conn.cursor() as cur:
             cur.execute("select id, name from lego_set order by id")
