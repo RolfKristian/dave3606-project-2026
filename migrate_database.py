@@ -53,6 +53,20 @@ cur.execute(
     );
     """
 )
+
+# Code that creates indexes on item frequently read from, this is a part of Task 2.
+
+    # - Which LEGO sets contain a specific brick type, regardless of color?
+        # We can put a index on lego_inventory(brick_type_id, set_id).
+
+    # - Which LEGO sets contain bricks of a specific color, regardless of type
+        # Put index on lego_inventory(color_id, set_id).
+
+    # Explanation for these indexes: A Lego database is often more read-heavy rather than write-heavy. Hence, creating these indexes shoudl speed up select-statements drastically. Insertion and updating will take a bit longer time as the DBClient has to update the underlying B-tree for every query, but this is a good trade-off considering way more reading will be done than writing.
+
+cur.execute("CREATE INDEX IF NOT EXISTS idx_brick_in_sets ON lego_inventory(brick_type_id, set_id);")
+cur.execute("CREATE INDEX IF NOT EXISTS idx_color_in_sets ON lego_inventory(color_id, set_id);")
+
 cur.close()
 conn.commit()
 conn.close()
