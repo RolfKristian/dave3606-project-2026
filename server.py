@@ -1,8 +1,10 @@
 import json
 import html
 import psycopg
-from flask import Flask, Response, request, jsonify
+import atexit
+from flask import Flask, Response, request, jsonify, g
 from time import perf_counter
+from psycopg_pool import ConnectionPool
 
 app = Flask(__name__)
 
@@ -14,10 +16,26 @@ DB_CONFIG = {
     "password": "bricks",
 }
 
-# Global scope decleration
-#conn = psycopg.connect(**DB_CONFIG)
+# Use ConnectionPool instead of global definition as it has the same speed. Now every connection wont need to re-autenticate with the DB which saves some time.
+db_pool = ConnectionPool(
+    conninfo="",
+    kwargs=DB_CONFIG,
+    min_size=2,
+    max_size=4,
+    open=True
+)
+
+# This ensures Flask returns the connection to the pool at end of each network request.
+@app.teardown_appcontext
+def close_db(e=None):
+    db = g.pop('db', None)
+    if db is not None:
+        db_pool.putconn(db)
+
 def get_conn():
-    return psycopg.connect(**DB_CONFIG)
+    if 'db' not in g:
+        g.db = db_pool.getconn()
+    return g.db
 
 @app.route("/")
 def index():
@@ -28,23 +46,26 @@ def index():
 @app.route("/sets")
 def sets():
     template = open("templates/sets.html").read()
-    rows = ""
+    rows_list = []
 
     start_time = perf_counter()
     try:
-        with get_conn() as conn:
-            with conn.cursor() as cur:
-                cur.execute("select id, name from lego_set order by id")
-                for row in cur.fetchall():
-                    html_safe_id = html.escape(row[0])
-                    html_safe_name = html.escape(row[1])
-                    existing_rows = rows
-                    rows = existing_rows + f'<tr><td><a href="/set?id={html_safe_id}">{html_safe_id}</a></td><td>{html_safe_name}</td></tr>\n'
-            print(f"Time to render all sets: {perf_counter() - start_time}")
-    finally:
-        conn.close()
+        conn = get_conn()
+        with conn.cursor() as cur:
+            cur.execute("SELECT id, name FROM lego_set ORDER BY id")
+            for row in cur.fetchall():
+                html_safe_id = html.escape(row[0])
+                html_safe_name = html.escape(row[1])
+                rows_list.append(
+                    f'<tr><td><a href="/set?id={html_safe_id}">{html_safe_id}</a></td>'
+                    f'<td>{html_safe_name}</td></tr>'
+                )
+        
+        print(f"Time to render all sets: {perf_counter() - start_time}")
+    except Exception as e:
+        return jsonify({"internal server error": str(e)}), 500
 
-    page_html = template.replace("{ROWS}", rows)
+    page_html = template.replace("{ROWS}", "\n".join(rows_list))
     return Response(page_html, content_type="text/html")
 
 
@@ -66,16 +87,16 @@ def apiSet():
 def get_sets_by_brick(brick_type_id):
     try:
         result = []
-        with get_conn() as conn:
-            with conn.cursor() as cur:
-                query = "SELECT set_id, count FROM lego_inventory WHERE brick_type_id = %s"
-                cur.execute(query, (brick_type_id,))
+        conn = get_conn()
+        with conn.cursor() as cur:
+            query = "SELECT set_id, count FROM lego_inventory WHERE brick_type_id = %s"
+            cur.execute(query, (brick_type_id,))
 
-                rows = cur.fetchall()
-                for row in rows:
-                    result.add({"set_id": row[0], "count": row[1]})
-                
-            return jsonify(result)
+            rows = cur.fetchall()
+            for row in rows:
+                result.append({"set_id": row[0], "count": row[1]})
+            
+        return jsonify(result)
     except Exception as e:
         return jsonify({"internal server error": str(e)}), 500
 
@@ -83,18 +104,21 @@ def get_sets_by_brick(brick_type_id):
 def get_sets_by_color(color_id):
     try:
         result = []
-        with get_conn() as conn:
-            with conn.cursor() as cur:
-                query = "SELECT set_id, brick_type_id, count FROM lego_inventory WHERE color_id = %s"
-                cur.execute(query, (color_id,))
+        conn = get_conn()
+        with conn.cursor() as cur:
+            query = "SELECT set_id, brick_type_id, count FROM lego_inventory WHERE color_id = %s"
+            cur.execute(query, (color_id,))
 
-                rows = cur.fetchall()
-                for row in rows:
-                    result.append({"set_id": row[0], "brick_type_id": row[1], "count": row[2]})
-                
-            return jsonify(result)
+            rows = cur.fetchall()
+            for row in rows:
+                result.append({"set_id": row[0], "brick_type_id": row[1], "count": row[2]})
+            
+        return jsonify(result)
     except Exception as e:
         return jsonify({"internal server error": str(e)}), 500
+
+# Runs once at server's end and closes all DB connections.
+atexit.register(db_pool.close)
 
 if __name__ == "__main__":
     app.run(port=5000, debug=True)

@@ -12,9 +12,9 @@ cur = conn.cursor()
 
 cur.execute(
     """
-    drop table if exists lego_set;
-    drop table if exists lego_brick;
-    drop table if exists lego_inventory;
+    drop table if exists lego_set cascade;
+    drop table if exists lego_brick cascade;
+    drop table if exists lego_inventory cascade;
     """
 )
 
