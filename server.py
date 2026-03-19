@@ -2,6 +2,7 @@ import json
 import html
 import psycopg
 import atexit
+import gzip
 from flask import Flask, Response, request, jsonify, g
 from time import perf_counter
 from psycopg_pool import ConnectionPool
@@ -39,40 +40,58 @@ def get_conn():
 
 @app.route("/")
 def index():
-    template = open("templates/index.html").read()
-    return Response(template)
+    try:
+        with open("templates/index.html") as template:
+            content = template.read()
+            return Response(content)
+    except Exception as e:
+        return jsonify({"internal server error": str(e)}), 500
 
 
 @app.route("/sets")
 def sets():
-    template = open("templates/sets.html").read()
     rows_list = []
-
     start_time = perf_counter()
+
+    supported_encodings = {"UTF-16-LE", "UTF-16-BE", "UTF-32-LE", "UTF-32-BE", "UTF-8"}
+    encoding = request.args.get("charset", "UTF-8").upper() # This is the user defined encoding from "sets/?charset=UTF-16-LE", with a default value of "UTF-8"
+    if encoding not in supported_encodings:
+        encoding = "UTF-8"
+
     try:
+        with open("templates/sets.html") as template:
+            content = template.read()
+            content = content.replace("charset=\"UTF-8\"", f"charset=\"{encoding}\"")
+
         conn = get_conn()
         with conn.cursor() as cur:
             cur.execute("SELECT id, name FROM lego_set ORDER BY id")
             for row in cur.fetchall():
-                html_safe_id = html.escape(row[0])
-                html_safe_name = html.escape(row[1])
+                html_safe_id = html.escape(str(row[0]))
+                html_safe_name = html.escape(str(row[1]))
                 rows_list.append(
                     f'<tr><td><a href="/set?id={html_safe_id}">{html_safe_id}</a></td>'
                     f'<td>{html_safe_name}</td></tr>'
                 )
         
         print(f"Time to render all sets: {perf_counter() - start_time}")
+
+        page_html = content.replace("{ROWS}", "\n".join(rows_list))
+
+        page_html_bytes = page_html.encode(encoding)
+        compressed_bytes = gzip.compress(page_html_bytes)
+        return Response(compressed_bytes, content_type=f"text/html; charset={encoding}", headers={"Content-Encoding": "gzip"})
     except Exception as e:
         return jsonify({"internal server error": str(e)}), 500
 
-    page_html = template.replace("{ROWS}", "\n".join(rows_list))
-    return Response(page_html, content_type="text/html")
-
-
 @app.route("/set")
 def legoSet():  # We don't want to call the function `set`, since that would hide the `set` data type.
-    template = open("templates/set.html").read()
-    return Response(template)
+    try:
+        with open("templates/set.html") as template:
+            content = template.read()
+        return Response(content)
+    except Exception as e:
+        return jsonify({"internal server error": str(e)}), 500
 
 
 @app.route("/api/set")
