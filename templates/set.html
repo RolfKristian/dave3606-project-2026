@@ -28,14 +28,26 @@
                 .then(function(setData) { return setData.json(); })
                 .then(function(setJson) {
                     const inventoryTable = document.getElementById("inventory");
+                    
+                    
+                    const setId = document.getElementById("setId")
+                    const setName = document.getElementById("setName")
+                    
+                    setId.innerHTML = setJson.set_id
+                    setName.innerHTML = setJson.name
+                    
+                    setJson.inventory.forEach(element => {
                     const inventoryRow = document.createElement("tr");
-                    inventoryRow.innerHTML = (
-                        "<td>Example row</td>" +
-                        "<td>to show how to</td>" +
-                        "<td>dynamically construct HTML</td>" +
-                        "<td>in JavaScript</td>"
-                    )
-                    inventoryTable.appendChild(inventoryRow);
+                    inventoryTable.appendChild(inventoryRow)
+                    inventoryRow.innerHTML += (
+                        "<img src="+element.preview_image_url+">" +
+                        "<td>"+element.brick_type_id+"</td>" +
+                        "<td>"+element.color_id+"</td>" +
+                        "<td>"+element.count+"</td>"
+                        )
+                    
+                    });
+                    
                 })
                 .catch(function(err) {
                     document.getElementById("error").textContent = "Failed to load data: " + err;

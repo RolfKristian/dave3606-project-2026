@@ -65,7 +65,7 @@ def sets():
 
         conn = get_conn()
         with conn.cursor() as cur:
-            cur.execute("SELECT id, name FROM lego_set ORDER BY id")
+            cur.execute("select id, name from lego_set order by id")
             for row in cur.fetchall():
                 html_safe_id = html.escape(str(row[0]))
                 html_safe_name = html.escape(str(row[1]))
@@ -75,12 +75,11 @@ def sets():
                 )
         
         print(f"Time to render all sets: {perf_counter() - start_time}")
-
         page_html = content.replace("{ROWS}", "\n".join(rows_list))
-
         page_html_bytes = page_html.encode(encoding)
         compressed_bytes = gzip.compress(page_html_bytes)
         return Response(compressed_bytes, content_type=f"text/html; charset={encoding}", headers={"Content-Encoding": "gzip"})
+        
     except Exception as e:
         return jsonify({"internal server error": str(e)}), 500
 
@@ -93,13 +92,55 @@ def legoSet():  # We don't want to call the function `set`, since that would hid
     except Exception as e:
         return jsonify({"internal server error": str(e)}), 500
 
-
+#task 6
 @app.route("/api/set")
 def apiSet():
     set_id = request.args.get("id")
-    result = {"set_id": set_id}
+    conn = get_conn()
+    with conn.cursor() as cur:
+        query = """
+        select 
+        lego_set.name,
+        lego_inventory.brick_type_id,
+        lego_inventory.color_id,
+        lego_inventory.count,
+        lego_brick.name,
+        lego_brick.preview_image_url
+        from lego_set
+        join lego_inventory on lego_set.id = lego_inventory.set_id
+        left join lego_brick on (
+        lego_inventory.brick_type_id = lego_brick.brick_type_id and 
+        lego_inventory.color_id = lego_brick.color_id
+        )
+        where lego_set.id = %s
+        """
+        cur.execute(query, (set_id,))
+        rows = cur.fetchall()
+    
+
+    inventory_list = []
+    set_name = "unknown" #placeholder
+
+    for row in rows:
+        set_name = row[0]
+        inventory_list.append (
+            {
+            "brick_type_id": row[1],
+            "color_id": row[2],
+            "count": row[3],
+            "brick_name" : row[4],
+            "preview_image_url" :row[5]
+
+        }
+        )
+    result = {
+        "set_id": set_id,
+        "name": set_name,
+        "inventory": inventory_list
+    } 
     json_result = json.dumps(result, indent=4)
     return Response(json_result, content_type="application/json")
+
 
 # Task 2 API endpoints:
 @app.route("/api/brick_type_in_sets/<brick_type_id>")

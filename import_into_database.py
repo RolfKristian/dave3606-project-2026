@@ -50,6 +50,7 @@ for i, s in enumerate(sets):
             """
             insert into lego_inventory(set_id, brick_type_id, color_id, count)
             values (%s, %s, %s, %s)
+            on conflict (set_id, brick_type_id, color_id, count) do nothing 
             """,
             (s["setNumber"], inv["brickId"], inv["colorId"], inv["count"])
         )
