@@ -95,14 +95,6 @@ def legoSet():  # We don't want to call the function `set`, since that would hid
         return jsonify({"internal server error": str(e)}), 500
 
 
-# @app.route("/api/set")
-# def apiSet():
-#     set_id = request.args.get("id")
-#     result = {"set_id": set_id}
-#     json_result = json.dumps(result, indent=4)
-#     return Response(json_result, content_type="application/json")
-
-
 @app.route("/api/set")
 def apiSet():
     try:
