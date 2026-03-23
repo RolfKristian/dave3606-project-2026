@@ -9,6 +9,7 @@ from time import perf_counter
 from psycopg_pool import ConnectionPool
 
 app = Flask(__name__)
+cache = {}
 
 DB_CONFIG = {
     "host": "localhost",
@@ -101,7 +102,6 @@ def apiSet():
         set_id = request.args.get("id", type=str)
         if set_id is None:
             return jsonify({"error": "Missing id parameter"}), 400
-
         conn = get_conn()
         with conn.cursor() as cur:
 
@@ -116,8 +116,11 @@ def apiSet():
                 return jsonify({"error": "Set not found"}), 404
 
             cur.execute("""
-                SELECT brick_type_id, color_id, count
+                SELECT lego_inventory.brick_type_id, lego_inventory.color_id, lego_inventory.count, lego_brick.preview_image_url
                 FROM lego_inventory
+                LEFT JOIN lego_brick ON (
+                       lego_inventory.brick_type_id = lego_brick.brick_type_id AND lego_inventory.color_id = lego_brick.color_id 
+                        )
                 WHERE set_id = %s
             """, (set_id,))
             inventory_rows = cur.fetchall()
@@ -132,7 +135,8 @@ def apiSet():
                 {
                     "brick_type_id": r[0],
                     "color_id": r[1],
-                    "count": r[2]
+                    "count": r[2],
+                    "preview_image_url": r[3]
                 }
                 for r in inventory_rows
             ]
