@@ -39,7 +39,8 @@ for i, s in enumerate(sets):
     year = s["year"]
     cur.execute(
         """
-        insert into lego_set(id, name, year, category, preview_image_url) values(%s, %s, %s, %s, %s);
+        insert into lego_set(id, name, year, category, preview_image_url) values(%s, %s, %s, %s, %s)
+        ;
         """,
         (s["setNumber"], s["name"], None if year == 0 else year, s["category"], s["previewImageUrl"])
     )
@@ -50,6 +51,7 @@ for i, s in enumerate(sets):
             """
             insert into lego_inventory(set_id, brick_type_id, color_id, count)
             values (%s, %s, %s, %s)
+            on conflict (set_id, brick_type_id, color_id) do nothing;
             """,
             (s["setNumber"], inv["brickId"], inv["colorId"], inv["count"])
         )
