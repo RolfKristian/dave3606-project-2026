@@ -7,9 +7,10 @@ import struct
 from flask import Flask, Response, request, jsonify, g
 from time import perf_counter
 from psycopg_pool import ConnectionPool
+from LRU import LRUCache
 
 app = Flask(__name__)
-cache = {}
+cache = LRUCache(100)
 
 DB_CONFIG = {
     "host": "localhost",
@@ -54,7 +55,6 @@ def index():
 def sets():
     rows_list = []
     start_time = perf_counter()
-
     supported_encodings = {"UTF-16-LE", "UTF-16-BE", "UTF-32-LE", "UTF-32-BE", "UTF-8"}
     encoding = request.args.get("charset", "UTF-8").upper() # This is the user defined encoding from "sets/?charset=UTF-16-LE", with a default value of "UTF-8"
     if encoding not in supported_encodings:
@@ -82,7 +82,7 @@ def sets():
 
         page_html_bytes = page_html.encode(encoding)
         compressed_bytes = gzip.compress(page_html_bytes)
-        return Response(compressed_bytes, content_type=f"text/html; charset={encoding}", headers={"Content-Encoding": "gzip"})
+        return Response(compressed_bytes, content_type=f"text/html; charset={encoding}", headers={"Content-Encoding": "gzip", "Cache-Control": "max-age=60"})
     except Exception as e:
         return jsonify({"internal server error": str(e)}), 500
 
@@ -104,8 +104,8 @@ def apiSet():
             return jsonify({"error": "Missing id parameter"}), 400
         
         
-        if set_id in cache:
-            return Response(cache[set_id], content_type="application/json")
+        if cache.get(set_id) != -1:
+            return Response(cache.get(set_id), content_type="application/json")
         else:
             conn = get_conn()
             with conn.cursor() as cur:
@@ -147,7 +147,7 @@ def apiSet():
                 ]
             }
             json_result = json.dumps(result)
-            cache[set_id] = json_result
+            cache.put(set_id, json_result)
             return Response(json_result, content_type="application/json")
 
     except Exception as e:
