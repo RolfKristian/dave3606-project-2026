@@ -8,9 +8,10 @@ from flask import Flask, Response, request, jsonify, g
 from time import perf_counter
 from psycopg_pool import ConnectionPool
 from LRU import LRUCache
-
 app = Flask(__name__)
+
 cache = LRUCache(100)
+supported_encodings = {"UTF-16-LE", "UTF-16-BE", "UTF-32-LE", "UTF-32-BE", "UTF-8"}
 
 DB_CONFIG = {
     "host": "localhost",
@@ -29,138 +30,75 @@ db_pool = ConnectionPool(
     open=True
 )
 
-# This ensures Flask returns the connection to the pool at end of each network request.
-@app.teardown_appcontext
-def close_db(e=None):
-    db = g.pop('db', None)
-    if db is not None:
-        db_pool.putconn(db)
-
-def get_conn():
-    if 'db' not in g:
-        g.db = db_pool.getconn()
-    return g.db
-
-@app.route("/")
-def index():
-    try:
-        with open("templates/index.html") as template:
-            content = template.read()
-            return Response(content)
-    except Exception as e:
-        return jsonify({"internal server error": str(e)}), 500
-
-
-@app.route("/sets")
-def sets():
-    rows_list = []
-    start_time = perf_counter()
-    supported_encodings = {"UTF-16-LE", "UTF-16-BE", "UTF-32-LE", "UTF-32-BE", "UTF-8"}
+def get_encoding():
     encoding = request.args.get("charset", "UTF-8").upper() # This is the user defined encoding from "sets/?charset=UTF-16-LE", with a default value of "UTF-8"
     if encoding not in supported_encodings:
         encoding = "UTF-8"
+        return encoding
 
-    try:
-        with open("templates/sets.html") as template:
+def get_set_html(conn, query,encoding):
+    with open("templates/sets.html") as template:
             content = template.read()
             content = content.replace("charset=\"UTF-8\"", f"charset=\"{encoding}\"")
-
-        conn = get_conn()
-        with conn.cursor() as cur:
-            cur.execute("SELECT id, name FROM lego_set ORDER BY id")
-            for row in cur.fetchall():
-                html_safe_id = html.escape(str(row[0]))
-                html_safe_name = html.escape(str(row[1]))
-                rows_list.append(
-                    f'<tr><td><a href="/set?id={html_safe_id}">{html_safe_id}</a></td>'
-                    f'<td>{html_safe_name}</td></tr>'
-                )
+    rows_list = []
+    start_time = perf_counter()
+    with conn as cur:
+        cur.execute(query)
+        rows = cur.fetchall()
+        for row in rows:
+            html_safe_id = html.escape(str(row[0]))
+            html_safe_name = html.escape(str(row[1]))
+            rows_list.append(
+                f'<tr><td><a href="/set?id={html_safe_id}">{html_safe_id}</a></td>'
+                f'<td>{html_safe_name}</td></tr>'
+            )
         
         print(f"Time to render all sets: {perf_counter() - start_time}")
 
         page_html = content.replace("{ROWS}", "\n".join(rows_list))
 
-        page_html_bytes = page_html.encode(encoding)
-        compressed_bytes = gzip.compress(page_html_bytes)
-        return Response(compressed_bytes, content_type=f"text/html; charset={encoding}", headers={"Content-Encoding": "gzip", "Cache-Control": "max-age=60"})
-    except Exception as e:
-        return jsonify({"internal server error": str(e)}), 500
+          
+    
+        return page_html
 
-@app.route("/set")
-def legoSet():  # We don't want to call the function `set`, since that would hide the `set` data type.
-    try:
-        with open("templates/set.html") as template:
-            content = template.read()
-        return Response(content)
-    except Exception as e:
-        return jsonify({"internal server error": str(e)}), 500
+def get_set_jsonInfo(conn, set_id):
+    with conn.cursor() as cur:
 
+        cur.execute("""
+            SELECT id, name, year, category, preview_image_url
+            FROM lego_set
+            WHERE id = %s
+        """, (set_id,))
+        set_row = cur.fetchone()
 
-@app.route("/api/set")
-def apiSet():
-    try:
-        set_id = request.args.get("id", type=str)
-        if set_id is None:
-            return jsonify({"error": "Missing id parameter"}), 400
-        
-        
-        if cache.get(set_id) != -1:
-            return Response(cache.get(set_id), content_type="application/json")
-        else:
-            conn = get_conn()
-            with conn.cursor() as cur:
+        if set_row is None:
+            return None
 
-                cur.execute("""
-                    SELECT id, name, year, category, preview_image_url
-                    FROM lego_set
-                    WHERE id = %s
-                """, (set_id,))
-                set_row = cur.fetchone()
+        cur.execute("""
+            SELECT brick_type_id, color_id, count
+            FROM lego_inventory
+            WHERE set_id = %s
+        """, (set_id,))
+        inventory_rows = cur.fetchall()
 
-                if set_row is None:
-                    return jsonify({"error": "Set not found"}), 404
-
-                cur.execute("""
-                    SELECT lego_inventory.brick_type_id, lego_inventory.color_id, lego_inventory.count, lego_brick.preview_image_url
-                    FROM lego_inventory
-                    LEFT JOIN lego_brick ON (
-                        lego_inventory.brick_type_id = lego_brick.brick_type_id AND lego_inventory.color_id = lego_brick.color_id 
-                            )
-                    WHERE set_id = %s
-                """, (set_id,))
-                inventory_rows = cur.fetchall()
-
-            result = {
-                "id": set_row[0],
-                "name": set_row[1],
-                "year": set_row[2],
-                "category": set_row[3],
-                "preview_image_url": set_row[4],
-                "inventory": [
-                    {
-                        "brick_type_id": r[0],
-                        "color_id": r[1],
-                        "count": r[2],
-                        "preview_image_url": r[3]
-                    }
-                    for r in inventory_rows
-                ]
+    result = {
+        "id": set_row[0],
+        "name": set_row[1],
+        "year": set_row[2],
+        "category": set_row[3],
+        "preview_image_url": set_row[4],
+        "inventory": [
+            {
+                "brick_type_id": r[0],
+                "color_id": r[1],
+                "count": r[2]
             }
-            json_result = json.dumps(result)
-            cache.put(set_id, json_result)
-            return Response(json_result, content_type="application/json")
+            for r in inventory_rows
+        ]
+    }
+    return json.dumps(result)
 
-    except Exception as e:
-        return jsonify({"internal server error": str(e)}), 500
-
-
-@app.route("/api/set/binary")
-def api_set_binary():
-    set_id = request.args.get("id")
-    if not set_id:
-        return Response("Missing id", status=400)
-
-    conn = get_conn()
+def get_set_binary_data(conn, set_id):
     with conn.cursor() as cur:
 
         cur.execute("""
@@ -171,7 +109,7 @@ def api_set_binary():
         row = cur.fetchone()
 
         if not row:
-            return Response("Set not found", status=404)
+            return None
 
         set_id_val, name, year = row
 
@@ -207,7 +145,99 @@ def api_set_binary():
 
         data += struct.pack(">H", color_id)
         data += struct.pack(">H", count)
+    return data
 
+def get_sets_by_column(conn, query, column, column_names):
+    
+    with conn.cursor() as cur:
+        cur.execute(query, (column,))
+        rows = cur.fetchall()
+        return [dict(zip(column_names, row)) for row in rows]
+        
+# This ensures Flask returns the connection to the pool at end of each network request.
+@app.teardown_appcontext
+def close_db(e=None):
+    db = g.pop('db', None)
+    if db is not None:
+        db_pool.putconn(db)
+
+def get_conn():
+    if 'db' not in g:
+        g.db = db_pool.getconn()
+    return g.db
+
+@app.route("/")
+def index():
+    try:
+        with open("templates/index.html") as template:
+            content = template.read()
+            return Response(content)
+    except Exception as e:
+        return jsonify({"internal server error": str(e)}), 500
+
+
+@app.route("/sets")
+def sets():
+    encoding = get_encoding()
+
+    try:    
+        conn = get_conn()
+        query = ("SELECT id, name FROM lego_set ORDER BY id")
+        page_html = get_set_html(conn,query,encoding)
+        page_html_bytes = page_html.encode(encoding)
+        compressed_bytes = gzip.compress(page_html_bytes) 
+
+        
+        return Response(compressed_bytes, content_type=f"text/html; charset={encoding}", headers={"Content-Encoding": "gzip"})
+    except Exception as e:
+        return jsonify({"internal server error": str(e)}), 500
+
+@app.route("/set")
+def legoSet():  # We don't want to call the function `set`, since that would hide the `set` data type.
+    try:
+        with open("templates/set.html") as template:
+            content = template.read()
+        return Response(content)
+    except Exception as e:
+        return jsonify({"internal server error": str(e)}), 500
+
+
+@app.route("/api/set")
+def apiSet():
+    try:
+        
+        set_id = request.args.get("id", type=str)
+        cached_data = cache.get(set_id)
+        if set_id is None:
+            return jsonify({"error": "Missing id parameter"}), 400
+
+        if cached_data != -1:
+            return Response(cached_data, content_type="application/json")
+        else:
+
+            conn = get_conn()
+
+            json_string = get_set_jsonInfo(conn,set_id)
+            cache.put(set_id, json_string)
+            if json_string == None:
+                return jsonify({"error": "Set not found"}), 404
+            
+            return Response(json_string,content_type="application/json")
+    except Exception as e:
+        return jsonify({"internal server error": str(e)}), 500
+
+
+@app.route("/api/set/binary")
+def api_set_binary():
+    set_id = request.args.get("id")
+    if not set_id:
+        return Response("Missing id", status=400)
+
+    conn = get_conn()
+    data = get_set_binary_data(conn,set_id)
+    if data is None:
+        return Response("Set not found", status=404)
+    
     return Response(bytes(data), content_type="application/octet-stream")
 
 
@@ -217,34 +247,26 @@ def get_sets_by_brick(brick_type_id):
     try:
         result = []
         conn = get_conn()
-        with conn.cursor() as cur:
-            query = "SELECT set_id, count FROM lego_inventory WHERE brick_type_id = %s"
-            cur.execute(query, (brick_type_id,))
-
-            rows = cur.fetchall()
-            for row in rows:
-                result.append({"set_id": row[0], "count": row[1]})
-            
-        return jsonify(result)
+        query = "SELECT set_id, count FROM lego_inventory WHERE brick_type_id = %s"
+        column_names = ["set_id", "count"]
+        result = get_sets_by_column(conn,query,brick_type_id,column_names)            
+        json_string = json.dumps(result)
+        return Response(json_string,content_type="application/json")
     except Exception as e:
         return jsonify({"internal server error": str(e)}), 500
 
 @app.route("/api/color_id_in_sets/<color_id>")
 def get_sets_by_color(color_id):
     try:
-        result = []
         conn = get_conn()
-        with conn.cursor() as cur:
-            query = "SELECT set_id, brick_type_id, count FROM lego_inventory WHERE color_id = %s"
-            cur.execute(query, (color_id,))
-
-            rows = cur.fetchall()
-            for row in rows:
-                result.append({"set_id": row[0], "brick_type_id": row[1], "count": row[2]})
-            
-        return jsonify(result)
+        query = "SELECT set_id, brick_type_id, count FROM lego_inventory WHERE color_id = %s"
+        columns = ["set_id", "brick_type_id", "count"]
+        result = get_sets_by_column(conn,query,color_id,columns)
+        json_string = json.dumps(result)
+        return Response(json_string,content_type="application/json")
     except Exception as e:
         return jsonify({"internal server error": str(e)}), 500
+
 
 # Runs once at server's end and closes all DB connections.
 atexit.register(db_pool.close)
