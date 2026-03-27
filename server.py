@@ -94,24 +94,21 @@ def get_api_set_logic(db, set_id):
 
 
 def get_set_binary_data(db, set_id):
-    db.cur.execute("""
-            SELECT id, name, year
-            FROM lego_set
-            WHERE id = %s
-        """, (set_id,))
-    row = db.cur.fetchone()
+    query = "SELECT id, name, year FROM lego_set WHERE id = %s"
+    rows = db.execute_and_fetch_all(query, (set_id,))
+    row = rows[0] if rows else None
 
     if not row:
-        return Response("Set not found", status=404)
+        return None
 
     set_id_val, name, year = row
-
-    db.cur.execute("""
+    
+    query = ("""
             SELECT brick_type_id, color_id, count
             FROM lego_inventory
             WHERE set_id = %s
-        """, (set_id,))
-    inventory_rows = db.cur.fetchall()
+        """)
+    inventory_rows = db.execute_and_fetch_all(query, (set_id,))
 
     num_parts = sum(r[2] for r in inventory_rows)
     data = bytearray()
@@ -208,6 +205,9 @@ def api_set_binary():
     try:
         data = get_set_binary_data(db,set_id)
         
+        if data is None:
+            return Response("Set not found", status =404)
+
         return Response(bytes(data), content_type="application/octet-stream")
     except Exception as e:
         return Response(str(e), status=500)
