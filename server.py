@@ -92,14 +92,54 @@ def get_api_set_logic(db, set_id):
     cache.put(set_id, json_result)
     return json_result
 
-def get_sets_by_brick_logic(db, brick_type_id):
-    rows = db.execute_and_fetch_all("SELECT set_id, count FROM lego_inventory WHERE brick_type_id = %s", (brick_type_id,))
-    result = [{"set_id": row[0], "count": row[1]} for row in rows]
-    return json.dumps(result)
 
-def get_sets_by_color_logic(db, color_id):
-    rows = db.execute_and_fetch_all("SELECT set_id, brick_type_id, count FROM lego_inventory WHERE color_id = %s", (color_id,))
-    result = [{"set_id": row[0], "brick_type_id": row[1], "count": row[2]} for row in rows]
+def get_set_binary_data(db, set_id):
+    db.cur.execute("""
+            SELECT id, name, year
+            FROM lego_set
+            WHERE id = %s
+        """, (set_id,))
+    row = db.cur.fetchone()
+
+    if not row:
+        return Response("Set not found", status=404)
+
+    set_id_val, name, year = row
+
+    db.cur.execute("""
+            SELECT brick_type_id, color_id, count
+            FROM lego_inventory
+            WHERE set_id = %s
+        """, (set_id,))
+    inventory_rows = db.cur.fetchall()
+
+    num_parts = sum(r[2] for r in inventory_rows)
+    data = bytearray()
+
+    set_id_bytes = set_id_val.encode("utf-8")
+    data += struct.pack("B", len(set_id_bytes))
+    data += set_id_bytes
+
+    data += struct.pack(">H", year)
+    data += struct.pack(">H", num_parts)
+
+    name_bytes = name.encode("utf-8")
+    data += struct.pack("B", len(name_bytes))
+    data += name_bytes
+
+    data += struct.pack(">I", len(inventory_rows))
+
+    for brick_type_id, color_id, count in inventory_rows:
+        brick_id_bytes = str(brick_type_id).encode("utf-8")
+        data += struct.pack("B", len(brick_id_bytes))
+        data += brick_id_bytes
+        data += struct.pack(">H", color_id)
+        data += struct.pack(">H", count)
+    return data
+
+def get_sets_by_column(db, query, column, column_names):
+    rows = db.execute_and_fetch_all(query,(column,))
+    result = [dict(zip(column_names, row)) for row in rows]
     return json.dumps(result)
 
 @app.route("/")
@@ -163,48 +203,8 @@ def api_set_binary():
 
     db = Database()
     try:
-        db.cur.execute("""
-            SELECT id, name, year
-            FROM lego_set
-            WHERE id = %s
-        """, (set_id,))
-        row = db.cur.fetchone()
-
-        if not row:
-            return Response("Set not found", status=404)
-
-        set_id_val, name, year = row
-
-        db.cur.execute("""
-            SELECT brick_type_id, color_id, count
-            FROM lego_inventory
-            WHERE set_id = %s
-        """, (set_id,))
-        inventory_rows = db.cur.fetchall()
-
-        num_parts = sum(r[2] for r in inventory_rows)
-        data = bytearray()
-
-        set_id_bytes = set_id_val.encode("utf-8")
-        data += struct.pack("B", len(set_id_bytes))
-        data += set_id_bytes
-
-        data += struct.pack(">H", year)
-        data += struct.pack(">H", num_parts)
-
-        name_bytes = name.encode("utf-8")
-        data += struct.pack("B", len(name_bytes))
-        data += name_bytes
-
-        data += struct.pack(">I", len(inventory_rows))
-
-        for brick_type_id, color_id, count in inventory_rows:
-            brick_id_bytes = str(brick_type_id).encode("utf-8")
-            data += struct.pack("B", len(brick_id_bytes))
-            data += brick_id_bytes
-            data += struct.pack(">H", color_id)
-            data += struct.pack(">H", count)
-
+        data = get_set_binary_data(db,set_id)
+        
         return Response(bytes(data), content_type="application/octet-stream")
     except Exception as e:
         return Response(str(e), status=500)
@@ -216,7 +216,9 @@ def api_set_binary():
 def get_sets_by_brick(brick_type_id):
     db = Database()
     try:
-        result_json = get_sets_by_brick_logic(db, brick_type_id)
+        query = "SELECT set_id, count FROM lego_inventory WHERE brick_type_id = %s"
+        column_names = ["set_id", "count"]
+        result_json = get_sets_by_column(db, query,brick_type_id,column_names)
         return Response(result_json, content_type="application/json")
     except Exception as e:
         return jsonify({"internal server error": str(e)}), 500
@@ -227,7 +229,9 @@ def get_sets_by_brick(brick_type_id):
 def get_sets_by_color(color_id):
     db = Database()
     try:
-        result_json = get_sets_by_color_logic(db, color_id)
+        query = "SELECT set_id, brick_type_id, count FROM lego_inventory WHERE color_id = %s"
+        column_names = ["set_id","brick_type_id","count"]
+        result_json = get_sets_by_column(db,query,color_id,column_names)
         return Response(result_json, content_type="application/json")
     except Exception as e:
         return jsonify({"internal server error": str(e)}), 500
