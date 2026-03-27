@@ -1,6 +1,6 @@
 import json
 from mock_db import MockDB
-from server import get_sets_logic, get_api_set_logic, cache
+from server import get_sets_logic, get_api_set_logic, cache, get_set_binary_data,get_sets_by_column
 
 def AssertionErrorMessage(label,expected,actual):
     return (
@@ -154,9 +154,51 @@ def test_get_api_set_logic_second_call():
 
     assert mock_db.received == [], AssertionErrorMessage("Mock database query", [], mock_db.received)
 
+def test_get_api_set_binary_data():
+    set_id = "1234"
+    set_row = ("1234", "Dragon", 2020)
+    inv_rows = [(1,5,10)]
+
+    mock_db = MockDB({
+        ("SELECT id, name, year FROM lego_set WHERE id = %s", (set_id,)): [set_row],
+        ("SELECT brick_type_id, color_id, count FROM lego_inventory WHERE set_id = %s", (set_id,)): inv_rows
+    })
+
+    binary_data = get_set_binary_data(mock_db,set_id)
+
+    assert isinstance(binary_data,bytearray), "Output should be bytearray"
+    assert len(binary_data) > 0, "Binary data should not be empty"
+
+
+def test_get_sets_by_column():
+    query = "SELECT set_id, count FROM lego_inventory WHERE brick_type_id = %s"
+    column_names = ["set_id", "count"]
+    set_rows = [("4545",1),("111111",10)]
+    mock_db = MockDB({(query, ("brick_1",)): set_rows})
+    json_result = get_sets_by_column(mock_db,query,"brick_1",column_names)
+    data = json.loads(json_result)
+
+    assert len(data) == 2, AssertionErrorMessage("row count", 2, len(data))
+    assert data[0]["set_id"] == "4545", AssertionErrorMessage("First row", "4545", data[0]["set_id"])
+
+def test_get_api_set_logic_not_found():
+    set_id = "0"
+    query = """
+        SELECT id, name, year, category, preview_image_url
+        FROM lego_set WHERE id = %s
+    """
+    mock_db = MockDB({
+        (query, (set_id,)): [] 
+    })
+    result = get_api_set_logic(mock_db, set_id)
+    assert result is None, AssertionErrorMessage("Missing Set", None, result)
+
 if __name__ == "__main__":
     print("Running tests...")
     test_get_sets_logic()
     test_get_api_set_logic_first_call()
     test_get_api_set_logic_second_call()
+    test_get_api_set_binary_data()
+    test_get_sets_by_column()
+    test_get_api_set_logic_not_found()
     print("All tests passed!")
