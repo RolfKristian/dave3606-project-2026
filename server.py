@@ -155,6 +155,9 @@ def index():
 def sets():
     start_time = perf_counter()
     encoding = request.args.get("charset", "UTF-8").upper()
+    supported_encoding = {"UTF-8", "UTF-16"}
+    if encoding not in supported_encoding:
+        encoding = "UTF-8"
     
     db = Database()
     try:
@@ -239,6 +242,6 @@ def get_sets_by_color(color_id):
         db.close()
 
 if __name__ == "__main__":
-    app.run(port=3000, debug=True)
+    app.run(port=5000, debug=True)
 
 # Note: If you define new routes, they have to go above the call to `app.run`.
